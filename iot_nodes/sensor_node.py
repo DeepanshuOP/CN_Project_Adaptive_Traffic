@@ -82,6 +82,5 @@ def main():
 
     send_vehicle_data(args.junction, args.host, args.port, args.interval)
 
-
 if __name__ == "__main__":
     main()

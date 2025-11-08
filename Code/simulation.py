@@ -9,7 +9,6 @@ import signal
 from flask import Flask, jsonify
 
 
-
 # === DEFAULT CONFIGURATION ===
 defaultRed = 150
 defaultYellow = 5
