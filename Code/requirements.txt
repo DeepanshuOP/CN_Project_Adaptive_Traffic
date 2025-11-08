@@ -1,0 +1,10 @@
+# --- Visualization & Simulation ---
+pygame==2.6.1
+
+# --- Optional Visualization (if you plan to plot data) ---
+matplotlib==3.10.7
+
+# --- Networking / CN Layer ---
+requests==2.32.3
+flask==3.0.3
+grpcio==1.67.1
