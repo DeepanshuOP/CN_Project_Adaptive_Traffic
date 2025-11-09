@@ -25,6 +25,12 @@ currentGreen = 0
 nextGreen = (currentGreen + 1) % noOfSignals
 currentYellow = 0
 
+# === SCOOT SETTINGS ===
+TOTAL_CYCLE_TIME = 120       # seconds per full signal rotation
+SCOOT_UPDATE_INTERVAL = 10   # seconds between optimization updates
+SCOOT_MIN_GREEN = 10
+SCOOT_MAX_GREEN = 60
+
 # === VEHICLE TIMING AND SPEED ===
 carTime = 2
 bikeTime = 1
@@ -267,6 +273,71 @@ class Vehicle(pygame.sprite.Sprite):
                              or vehicles[self.direction][self.lane][self.index - 1].turned == 1)):
                     self.y -= self.speed
 
+def apply_scoot_optimization():
+    """Applies SCOOT logic with adaptive scaling for realistic timings."""
+    try:
+        if not pending_sensor_readings:
+            return
+
+        total_vehicles = sum(pending_sensor_readings.values()) or 1
+
+        # --- SCOOT TUNING CONSTANTS ---
+        BASE_GREEN = 8                 # baseline seconds
+        MAX_GREEN_CAP = 25             # upper bound in seconds for any approach
+        MIN_GREEN_CAP = 8              # minimum even if no traffic
+        DAMPING_FACTOR = 0.55          # less than 1 = gentler response
+        VEHICLE_SCALER = 1.2           # reduces effect of large queues
+
+        print("\n📊 SCOOT Reallocation:")
+        adjusted_total = sum(math.sqrt(v + 1) for v in pending_sensor_readings.values())
+
+        for jid, vcount in pending_sensor_readings.items():
+            idx = jid - 1
+            if idx == currentGreen:
+                print(f"⏸️ Junction {jid} currently green — skipping update.")
+                continue
+
+            # Normalize both by total traffic and absolute vehicle magnitude
+            share_ratio = (math.sqrt(vcount + 1) / adjusted_total) ** DAMPING_FACTOR
+
+            # scale with a soft response to actual queue length
+            traffic_influence = min(vcount / 10, 2.5) / VEHICLE_SCALER  # caps at 2.1x boost
+            new_green = BASE_GREEN + (share_ratio * 10 * traffic_influence)
+
+            # clamp
+            new_green = max(MIN_GREEN_CAP, min(MAX_GREEN_CAP, int(new_green)))
+            signals[idx].green = new_green
+
+            print(f"  • Junction {jid}: {vcount} vehicles → {new_green}s green")
+
+        pending_sensor_readings.clear()
+        print(f"🧮 SCOOT Optimization applied at {time.strftime('%H:%M:%S')}")
+    except Exception as e:
+        print("⚠️ SCOOT optimization error:", e)
+
+
+def updateValues():
+    """Decrements signals and periodically runs SCOOT optimization."""
+    static_counter = getattr(updateValues, "counter", 0)
+    updateValues.counter = static_counter + 1
+
+    # Every SCOOT_UPDATE_INTERVAL seconds, optimize
+    if updateValues.counter >= SCOOT_UPDATE_INTERVAL:
+        updateValues.counter = 0
+        with pending_lock:
+            apply_scoot_optimization()
+
+    # Normal countdown logic (always runs)
+    for i in range(noOfSignals):
+        if i == currentGreen:
+            if currentYellow == 0:
+                signals[i].green = max(0, signals[i].green - 1)
+                signals[i].totalGreenTime += 1
+            else:
+                signals[i].yellow = max(0, signals[i].yellow - 1)
+        else:
+            signals[i].red = max(0, signals[i].red - 1)
+
 
 # === INITIALIZATION ===
 # === INITIALIZATION ===
@@ -303,37 +374,6 @@ def repeat():
     nextGreen = (currentGreen + 1) % noOfSignals
     signals[nextGreen].red = signals[currentGreen].yellow + signals[currentGreen].green
     repeat()
-
-
-def updateValues():
-    # first, apply any pending sensor readings in a synchronized way
-    with pending_lock:
-        # iterate through keys to apply adjustments
-        for jid, vehicles in pending_sensor_readings.items():
-            if 1 <= jid <= len(signals):
-                idx = jid - 1
-                # do not override the currently green junction
-                if idx == currentGreen:
-                    continue
-                mapped_green = int(GREEN_MIN + (vehicles / 60.0) * (GREEN_MAX - GREEN_MIN))
-                mapped_green = max(GREEN_MIN, min(GREEN_MAX, mapped_green))
-                signals[idx].green = mapped_green
-                # Optionally adjust red timers for others to maintain relative timing:
-                # signals[(idx+1)%noOfSignals].red = signals[idx].yellow + signals[idx].green
-                # ...or implement any policy you want
-        # clear after applying
-        pending_sensor_readings.clear()
-
-    # existing logic (unchanged)
-    for i in range(noOfSignals):
-        if i == currentGreen:
-            if currentYellow == 0:
-                signals[i].green -= 1
-                signals[i].totalGreenTime += 1
-            else:
-                signals[i].yellow -= 1
-        else:
-            signals[i].red -= 1
 
 
 def generateVehicles():
@@ -406,10 +446,7 @@ GREEN_MIN = defaultMinimum
 GREEN_MAX = defaultMaximum
 
 def handle_sensor_data(payload):
-    """
-    payload expected: {"junction_id": int, "vehicles_detected": int, "timestamp": float}
-    We'll store latest reading and attempt to adjust signal green time if signals exist.
-    """
+    """Receives live vehicle counts from sensors (UDP) and stores them."""
     try:
         jid = int(payload.get("junction_id", 0))
         vehicles_count = int(payload.get("vehicles_detected", 0))
@@ -420,21 +457,6 @@ def handle_sensor_data(payload):
     with pending_lock:
         pending_sensor_readings[jid] = vehicles_count
 
-    # Try to apply immediately if signals are initialized
-    try:
-        if len(signals) >= jid >= 1:
-            idx = jid - 1
-            # Only adjust if the junction is NOT currently green
-            if idx != currentGreen:
-                # Simple linear mapping: more vehicles -> more green time
-                mapped_green = int(GREEN_MIN + (vehicles_count / 60.0) * (GREEN_MAX - GREEN_MIN))
-                mapped_green = max(GREEN_MIN, min(GREEN_MAX, mapped_green))
-                signals[idx].green = mapped_green
-                print(f"⚙️ Updated junction {jid}: vehicles={vehicles_count} -> new green={mapped_green}")
-            else:
-                print(f"⏸️ Junction {jid} is currently GREEN. Update postponed until next cycle.")
-    except Exception as e:
-        print("⚠️ handle_sensor_data error:", e)
 
 if start_udp_listener:
     try:
