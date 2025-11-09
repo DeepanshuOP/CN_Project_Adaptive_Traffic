@@ -1,10 +1,23 @@
 # --- Visualization & Simulation ---
 pygame==2.6.1
-
-# --- Optional Visualization (if you plan to plot data) ---
 matplotlib==3.10.7
 
-# --- Networking / CN Layer ---
+# --- Networking / Communication Layer ---
 requests==2.32.3
-flask==3.0.3
+Flask==3.0.3
 grpcio==1.67.1
+
+# --- Core Utilities (Used Across Simulation + IoT Nodes) ---
+argparse==1.4.0
+jsonschema==4.23.0
+python-dotenv==1.0.1
+
+# --- Logging and System Utilities ---
+logging==0.4.9.6
+Werkzeug==3.0.4
+itsdangerous==2.2.0
+Jinja2==3.1.4
+click==8.1.7
+
+# --- Optional (thread utilities for concurrency) ---
+threaded==4.1.0
